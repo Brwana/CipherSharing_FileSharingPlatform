@@ -1,55 +1,71 @@
-# fileshare_client.py
 import socket
 import json
 import os
-from crypto_utils import encrypt_file, decrypt_file, derive_key
+
 
 class FileShareClient:
-    def __init__(self, server_host='localhost', server_port=9000):
-        self.server_host = server_host
-        self.server_port = server_port
+    def __init__(self, host='localhost', port=9000):
+        self.host = host
+        self.port = port
 
-    def send_request(self, data):
+    def send_request(self, request):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.connect((self.server_host, self.server_port))
-            s.send(json.dumps(data).encode())
-            response = s.recv(8192)
-            return response
+            s.connect((self.host, self.port))
+            s.send(json.dumps(request).encode())
+            return json.loads(s.recv(8192).decode())
 
     def register(self, username, password):
-        return self.send_request({"command": "register", "username": username, "password": password})
+        response = self.send_request({
+            "command": "register",
+            "username": username,
+            "password": password
+        })
+        return response["message"]
 
     def login(self, username, password):
-        return self.send_request({"command": "login", "username": username, "password": password})
+        response = self.send_request({
+            "command": "login",
+            "username": username,
+            "password": password
+        })
+        return response["message"]
 
-    def upload_file(self, filepath, password):
+    def upload_file(self, filepath):
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"{filepath} not found")
+
         with open(filepath, 'rb') as f:
-            data = f.read()
-        salt = os.urandom(16)
-        key = derive_key(password, salt)
-        iv, ciphertext = encrypt_file(data, key)
-        payload = salt + iv + ciphertext
-        filename = os.path.basename(filepath)
-        return self.send_request({"command": "upload", "filename": filename, "data": payload.hex()})
+            filedata = f.read()
 
-    def download_file(self, filename, password, save_path):
-        response = self.send_request({"command": "download", "filename": filename})
-        if response.startswith(b"File not found"):
-            print("File not found")
-        else:
-            payload = bytes.fromhex(response.decode())
-            salt, iv, ciphertext = payload[:16], payload[16:32], payload[32:]
-            key = derive_key(password, salt)
-            data = decrypt_file(iv, ciphertext, key)
+        response = self.send_request({
+            "command": "upload",
+            "filename": os.path.basename(filepath),
+            "data": filedata.hex()
+        })
+        return response["message"]
+
+    def download_file(self, filename, save_path):
+        response = self.send_request({
+            "command": "download",
+            "filename": filename
+        })
+
+        if response["status"] == "success":
             with open(save_path, 'wb') as f:
-                f.write(data)
-            print("File downloaded and decrypted successfully")
+                f.write(bytes.fromhex(response["data"]))
+            return "Download complete"
+        return response["message"]
 
 
 if __name__ == '__main__':
+    # Create test file
+    with open('test.txt', 'w') as f:
+        f.write("This is a test file")
+
     client = FileShareClient()
-    print(client.register("nour", "secret123").decode())
-    print(client.login("nour", "secret123").decode())
     password = "secret123"
-    client.upload_file("test.txt", password)
-    client.download_file("test.txt", password, "received_test.txt")
+
+    print("Register:", client.register("nour", password))
+    print("Login:", client.login("nour", password))
+    print("Upload:", client.upload_file("test.txt"))
+    print("Download:", client.download_file("test.txt", "received_test.txt"))

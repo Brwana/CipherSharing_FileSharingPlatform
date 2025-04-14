@@ -50,18 +50,16 @@ def derive_key_from_password(password, salt):
     return key
 
 def encrypt_file(data: bytes, key: bytes):
-    iv = os.urandom(16)
+    iv = os.urandom(16)  # Generate a random initialization vector
     cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=backend)
     encryptor = cipher.encryptor()
-    ciphertext = encryptor.update(data) + encryptor.finalize()
-    return iv, ciphertext
-
+    ciphertext = encryptor.update(data) + encryptor.finalize()  # Encrypt the data
+    return iv, ciphertext  # Return iv and encrypted ciphertext
 
 def decrypt_file(iv: bytes, ciphertext: bytes, key: bytes):
     cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=backend)
     decryptor = cipher.decryptor()
-    return decryptor.update(ciphertext) + decryptor.finalize()
-
+    return decryptor.update(ciphertext) + decryptor.finalize()  # Decrypt the ciphertext
 
 def derive_key(password: str, salt: bytes):
     kdf = PBKDF2HMAC(
