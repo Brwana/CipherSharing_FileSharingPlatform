@@ -51,6 +51,10 @@ class FileSharePeer:
                     conn.send(json.dumps({"status": "success", "data": filedata.hex()}).encode())
                 else:
                     conn.send(json.dumps({"status": "error", "message": "File not found"}).encode())
+            elif command == "list_files":
+                files = os.listdir(self.shared_folder)
+                conn.send(json.dumps({"status": "success", "files": files}).encode())
+
 
         except Exception as e:
             conn.send(json.dumps({"status": "error", "message": str(e)}).encode())

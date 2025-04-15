@@ -30,16 +30,20 @@ class FileShareClient:
         })
         return response["message"]
 
-    def upload_file(self, filepath):
-        if not os.path.exists(filepath):
-            raise FileNotFoundError(f"{filepath} not found")
+    def upload_file(self, filename):
+        # Path where files to be uploaded are stored
+        upload_path = os.path.join(os.getcwd(), filename)
 
-        with open(filepath, 'rb') as f:
+        if not os.path.exists(upload_path):
+            raise FileNotFoundError(f"{filename} not found in the root directory")
+
+        with open(upload_path, 'rb') as f:
             filedata = f.read()
 
+        # Now the file will be uploaded to 'shared/files/'
         response = self.send_request({
             "command": "upload",
-            "filename": os.path.basename(filepath),
+            "filename": filename,
             "data": filedata.hex()
         })
         return response["message"]
@@ -56,16 +60,55 @@ class FileShareClient:
             return "Download complete"
         return response["message"]
 
+    def list_files(self):
+        response = self.send_request({
+            "command": "list_files"
+        })
+        return response.get("files", []) if response["status"] == "success" else response["message"]
+
 
 if __name__ == '__main__':
-    # Create test file
-    with open('test.txt', 'w') as f:
-        f.write("This is a test file")
-
     client = FileShareClient()
-    password = "secret123"
+    print("Welcome to CipherShare!")
 
-    print("Register:", client.register("nour", password))
-    print("Login:", client.login("nour", password))
-    print("Upload:", client.upload_file("test.txt"))
-    print("Download:", client.download_file("test.txt", "received_test.txt"))
+    while True:
+        print("\nOptions: register, login, upload, download, list, exit")
+        choice = input("Enter command: ").strip().lower()
+
+        if choice == "register":
+            username = input("Username: ")
+            password = input("Password: ")
+            print(client.register(username, password))
+
+        elif choice == "login":
+            username = input("Username: ")
+            password = input("Password: ")
+            print(client.login(username, password))
+
+
+        elif choice == "upload":
+
+             filename = input("Filename to upload (from shared/files): ")
+
+             print(client.upload_file(filename))
+
+
+        elif choice == "download":
+
+            filename = input("Filename to download: ")
+
+            save_path = os.path.join(os.getcwd(), filename)  # Save in current working directory
+
+            print(client.download_file(filename, save_path))
+
+
+        elif choice == "list":
+            print("Shared Files:", client.list_files())
+
+        elif choice == "exit":
+            break
+
+        else:
+            print("Invalid option.")
+
+
