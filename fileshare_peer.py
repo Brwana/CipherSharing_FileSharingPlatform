@@ -2,8 +2,10 @@ import socket
 import threading
 import json
 import os
-import hashlib
+import uuid
 from crypto_utils import encrypt_file, decrypt_file
+from argon2 import PasswordHasher
+
 
 class FileSharePeer:
     def __init__(self, host='localhost', port=9000):
@@ -14,22 +16,26 @@ class FileSharePeer:
         os.makedirs(self.shared_folder, exist_ok=True)
         os.makedirs(os.path.dirname(self.users_file), exist_ok=True)
 
-        # Load users if users.json exists
         if os.path.exists(self.users_file):
             with open(self.users_file, 'r') as f:
                 self.users = json.load(f)
         else:
             self.users = {}
 
-        # Active sessions
-        self.sessions = set()
+        self.sessions = {}  # session_token -> username
 
     def save_users(self):
         with open(self.users_file, 'w') as f:
             json.dump(self.users, f)
 
     def hash_password(self, password):
-        return hashlib.sha256(password.encode()).hexdigest()
+        return PasswordHasher().hash(password)
+
+    def verify_password(self, hashed_password, input_password):
+        try:
+            return PasswordHasher().verify(hashed_password, input_password)
+        except Exception:
+            return False
 
     def handle_client(self, conn):
         try:
@@ -49,16 +55,26 @@ class FileSharePeer:
 
             elif command == "login":
                 username = request["username"]
-                password = self.hash_password(request["password"])
-                if username in self.users and self.users[username] == password:
-                    self.sessions.add(username)
-                    conn.send(json.dumps({"status": "success", "message": "Logged in"}).encode())
+                input_password = request["password"]
+                if username in self.users:
+                    stored_hash = self.users[username]
+                    if self.verify_password(stored_hash, input_password):
+                        session_token = str(uuid.uuid4())
+                        self.sessions[session_token] = username
+                        conn.send(json.dumps({
+                            "status": "success",
+                            "message": "Logged in",
+                            "token": session_token
+                        }).encode())
+                    else:
+                        conn.send(json.dumps({"status": "error", "message": "Invalid credentials"}).encode())
                 else:
                     conn.send(json.dumps({"status": "error", "message": "Invalid credentials"}).encode())
 
-            elif command in ["upload", "download"]:
-                username = request.get("username")
-                if username not in self.sessions:
+            elif command in ["upload", "download", "list_files"]:
+                token = request.get("token")
+                username = self.sessions.get(token)
+                if not username:
                     conn.send(json.dumps({"status": "error", "message": "Authentication required"}).encode())
                     return
 
@@ -80,9 +96,9 @@ class FileSharePeer:
                     else:
                         conn.send(json.dumps({"status": "error", "message": "File not found"}).encode())
 
-            elif command == "list_files":
-                files = os.listdir(self.shared_folder)
-                conn.send(json.dumps({"status": "success", "files": files}).encode())
+                elif command == "list_files":
+                    files = os.listdir(self.shared_folder)
+                    conn.send(json.dumps({"status": "success", "files": files}).encode())
 
         except Exception as e:
             conn.send(json.dumps({"status": "error", "message": str(e)}).encode())
@@ -97,6 +113,7 @@ class FileSharePeer:
         while True:
             client_conn, _ = server_socket.accept()
             threading.Thread(target=self.handle_client, args=(client_conn,)).start()
+
 
 if __name__ == "__main__":
     peer = FileSharePeer()

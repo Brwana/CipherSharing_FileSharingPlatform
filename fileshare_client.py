@@ -7,7 +7,8 @@ class FileShareClient:
     def __init__(self, host='localhost', port=9000):
         self.host = host
         self.port = port
-        self.username = None  # Session tracking
+        self.username = None  # For display/UX
+        self.token = None     # Token for authentication
 
     def send_request(self, request):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -31,34 +32,36 @@ class FileShareClient:
         })
         if response["status"] == "success":
             self.username = username
+            self.token = response["token"]  # Save the token
         return response["message"]
 
-    def upload_file(self, filename):
-        if not self.username:
+    def upload_file(self):
+        if not self.token:
             return "You must log in first."
-
+        filename = input("Filename to upload (from current dir): ")
         upload_path = os.path.join(os.getcwd(), filename)
         if not os.path.exists(upload_path):
-            raise FileNotFoundError(f"{filename} not found in the root directory")
+            return f"{filename} not found in the current directory"
 
         with open(upload_path, 'rb') as f:
             filedata = f.read()
 
         response = self.send_request({
             "command": "upload",
-            "username": self.username,
+            "token": self.token,
             "filename": filename,
             "data": filedata.hex()
         })
         return response["message"]
 
-    def download_file(self, filename, save_path):
-        if not self.username:
+    def download_file(self):
+        if not self.token:
             return "You must log in first."
-
+        filename = input("Filename to download: ")
+        save_path = os.path.join(os.getcwd(), filename)
         response = self.send_request({
             "command": "download",
-            "username": self.username,
+            "token": self.token,
             "filename": filename
         })
 
@@ -69,10 +72,15 @@ class FileShareClient:
         return response["message"]
 
     def list_files(self):
+        if not self.token:
+            return "You must log in first."
+
         response = self.send_request({
-            "command": "list_files"
+            "command": "list_files",
+            "token": self.token
         })
         return response.get("files", []) if response["status"] == "success" else response["message"]
+
 
 
 if __name__ == '__main__':
@@ -94,13 +102,10 @@ if __name__ == '__main__':
             print(client.login(username, password))
 
         elif choice == "upload":
-            filename = input("Filename to upload (from shared/files): ")
-            print(client.upload_file(filename))
+            print(client.upload_file())
 
         elif choice == "download":
-            filename = input("Filename to download: ")
-            save_path = os.path.join(os.getcwd(), filename)
-            print(client.download_file(filename, save_path))
+            print(client.download_file())
 
         elif choice == "list":
             print("Shared Files:", client.list_files())
@@ -110,3 +115,5 @@ if __name__ == '__main__':
 
         else:
             print("Invalid option.")
+
+
