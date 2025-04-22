@@ -7,6 +7,7 @@ class FileShareClient:
     def __init__(self, host='localhost', port=9000):
         self.host = host
         self.port = port
+        self.username = None  # Session tracking
 
     def send_request(self, request):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -28,29 +29,36 @@ class FileShareClient:
             "username": username,
             "password": password
         })
+        if response["status"] == "success":
+            self.username = username
         return response["message"]
 
     def upload_file(self, filename):
-        # Path where files to be uploaded are stored
-        upload_path = os.path.join(os.getcwd(), filename)
+        if not self.username:
+            return "You must log in first."
 
+        upload_path = os.path.join(os.getcwd(), filename)
         if not os.path.exists(upload_path):
             raise FileNotFoundError(f"{filename} not found in the root directory")
 
         with open(upload_path, 'rb') as f:
             filedata = f.read()
 
-        # Now the file will be uploaded to 'shared/files/'
         response = self.send_request({
             "command": "upload",
+            "username": self.username,
             "filename": filename,
             "data": filedata.hex()
         })
         return response["message"]
 
     def download_file(self, filename, save_path):
+        if not self.username:
+            return "You must log in first."
+
         response = self.send_request({
             "command": "download",
+            "username": self.username,
             "filename": filename
         })
 
@@ -85,22 +93,14 @@ if __name__ == '__main__':
             password = input("Password: ")
             print(client.login(username, password))
 
-
         elif choice == "upload":
-
-             filename = input("Filename to upload (from shared/files): ")
-
-             print(client.upload_file(filename))
-
+            filename = input("Filename to upload (from shared/files): ")
+            print(client.upload_file(filename))
 
         elif choice == "download":
-
             filename = input("Filename to download: ")
-
-            save_path = os.path.join(os.getcwd(), filename)  # Save in current working directory
-
+            save_path = os.path.join(os.getcwd(), filename)
             print(client.download_file(filename, save_path))
-
 
         elif choice == "list":
             print("Shared Files:", client.list_files())
@@ -110,5 +110,3 @@ if __name__ == '__main__':
 
         else:
             print("Invalid option.")
-
-
