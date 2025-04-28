@@ -2,6 +2,8 @@ import socket
 import json
 import os
 
+from crypto_utils import encrypt_file, decrypt_file
+
 
 class FileShareClient:
     def __init__(self, host='localhost', port=9000):
@@ -9,12 +11,35 @@ class FileShareClient:
         self.port = port
         self.username = None  # For display/UX
         self.token = None     # Token for authentication
+        self.key = self._load_or_generate_key()
 
     def send_request(self, request):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.connect((self.host, self.port))
             s.send(json.dumps(request).encode())
             return json.loads(s.recv(8192).decode())
+
+
+    def _generate_key(self, key_length=16):
+        """Generate a random AES key (16 bytes for AES-128)."""
+        return os.urandom(key_length)
+
+    def _load_or_generate_key(self):
+        """Securely load or generate a key."""
+        import os
+        config_dir = os.path.expanduser("~/.config/fileshare_client")
+        os.makedirs(config_dir, exist_ok=True, mode=0o700)
+        key_file = os.path.join(config_dir, "client_key.bin")
+
+        if os.path.exists(key_file):
+            with open(key_file, "rb") as f:
+                return f.read()
+        else:
+            key = os.urandom(16)
+            with open(key_file, "wb") as f:
+                f.write(key)
+            os.chmod(key_file, 0o600)
+            return key
 
     def register(self, username, password):
         response = self.send_request({
@@ -23,6 +48,15 @@ class FileShareClient:
             "password": password
         })
         return response["message"]
+
+    def debug_session_status(self):
+        """Show current session status"""
+        if self.token:
+            print(f"\nSession Status: Logged in as {self.username}")
+            print(f"Token: {self.token[:8]}...")
+            print(f"Server verification: {'Valid' if self.check_session_status() else 'Invalid'}")
+        else:
+            print("\nSession Status: Not logged in")
 
     def login(self, username, password):
         response = self.send_request({
@@ -35,6 +69,35 @@ class FileShareClient:
             self.token = response["token"]  # Save the token
         return response["message"]
 
+    def logout(self):
+        if not self.token:
+            print("Not currently logged in")
+            return "Not logged in"
+
+        try:
+            # First verify the session exists
+            if not self.check_session_status():
+                self.username = None
+                self.token = None
+                return "Session already expired or invalid"
+
+            # Send logout request
+            response = self.send_request({
+                "command": "logout",
+                "token": self.token
+            })
+
+            if response.get("status") == "success":
+                self.username = None
+                self.token = None
+                print("Successfully logged out")
+                return "Logged out successfully"
+
+            return f"Logout failed: {response.get('message', 'Unknown error')}"
+
+        except Exception as e:
+            return f"Error during logout: {str(e)}"
+
     def upload_file(self):
         if not self.token:
             return "You must log in first."
@@ -46,11 +109,15 @@ class FileShareClient:
         with open(upload_path, 'rb') as f:
             filedata = f.read()
 
+        # Use the stored key (self.key)
+        iv, encrypted_data = encrypt_file(filedata, self.key)  # No hardcoded key
+
         response = self.send_request({
             "command": "upload",
             "token": self.token,
             "filename": filename,
-            "data": filedata.hex()
+            "iv": iv.hex(),
+            "data": encrypted_data.hex()
         })
         return response["message"]
 
@@ -66,10 +133,40 @@ class FileShareClient:
         })
 
         if response["status"] == "success":
+            filedata = bytes.fromhex(response["data"])
+            iv = filedata[:16]
+            encrypted_content = filedata[16:]
+
+            # Use the stored key (self.key)
+            decrypted_data = decrypt_file(iv, encrypted_content, self.key)
+
             with open(save_path, 'wb') as f:
-                f.write(bytes.fromhex(response["data"]))
+                f.write(decrypted_data)
             return "Download complete"
         return response["message"]
+
+    def check_session_status(self):
+        """Verify if current session is still valid"""
+        if not self.token:
+            print("No active session (no token)")
+            return False
+
+        try:
+            response = self.send_request({
+                "command": "check_session",
+                "token": self.token
+            })
+            if response.get("status") == "success":
+                print(f"Session valid for user: {response.get('username')}")
+                return True
+            print(f"Session invalid: {response.get('message', 'Unknown error')}")
+            return False
+        except json.JSONDecodeError:
+            print("Error: Invalid response from server")
+            return False
+        except Exception as e:
+            print(f"Error checking session: {str(e)}")
+            return False
 
     def list_files(self):
         if not self.token:
@@ -88,7 +185,7 @@ if __name__ == '__main__':
     print("Welcome to CipherShare!")
 
     while True:
-        print("\nOptions: register, login, upload, download, list, exit")
+        print("\nOptions: register, login, upload, download, list,exit")
         choice = input("Enter command: ").strip().lower()
 
         if choice == "register":
@@ -109,6 +206,11 @@ if __name__ == '__main__':
 
         elif choice == "list":
             print("Shared Files:", client.list_files())
+        elif choice == "logout":
+            print(client.logout())
+            client.debug_session_status()
+        elif choice == "check_session":
+            print(client.check_session_status())
 
         elif choice == "exit":
             break

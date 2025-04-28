@@ -31,6 +31,21 @@ class FileSharePeer:
     def hash_password(self, password):
         return PasswordHasher().hash(password)
 
+    def is_logged_in(self, username):
+        """Check if user has an active session"""
+        return username in self.sessions.values()
+
+    def print_active_sessions(self):
+        """Debug method to show active sessions"""
+        print("\nActive Sessions:")
+        for token, username in self.sessions.items():
+            print(f"- {username} (token: {token[:8]}...)")
+        print()
+
+    def get_active_sessions(self):
+        """Return all active sessions"""
+        return self.sessions.copy()
+
     def verify_password(self, hashed_password, input_password):
         try:
             return PasswordHasher().verify(hashed_password, input_password)
@@ -70,7 +85,19 @@ class FileSharePeer:
                         conn.send(json.dumps({"status": "error", "message": "Invalid credentials"}).encode())
                 else:
                     conn.send(json.dumps({"status": "error", "message": "Invalid credentials"}).encode())
-
+            elif command == "logout":
+                token = request.get("token")
+                if token in self.sessions:
+                    del self.sessions[token]
+                    conn.send(json.dumps({
+                        "status": "success",
+                        "message": "Logged out successfully"
+                    }).encode())
+                else:
+                    conn.send(json.dumps({
+                        "status": "error",
+                        "message": "Invalid session"
+                    }).encode())
             elif command in ["upload", "download", "list_files"]:
                 token = request.get("token")
                 username = self.sessions.get(token)
@@ -81,10 +108,14 @@ class FileSharePeer:
                 if command == "upload":
                     filename = request["filename"]
                     filedata = bytes.fromhex(request["data"])
+                    iv = bytes.fromhex(request["iv"])
+
                     filepath = os.path.join(self.shared_folder, filename)
                     with open(filepath, 'wb') as f:
-                        f.write(filedata)
+                        f.write(iv + filedata)  # store IV + encrypted file together
+
                     conn.send(json.dumps({"status": "success", "message": "Uploaded"}).encode())
+
 
                 elif command == "download":
                     filename = request["filename"]
@@ -100,6 +131,33 @@ class FileSharePeer:
                     files = os.listdir(self.shared_folder)
                     conn.send(json.dumps({"status": "success", "files": files}).encode())
 
+
+                elif command == "check_session":
+
+                    token = request.get("token")
+
+                    if token in self.sessions:
+
+                        conn.send(json.dumps({
+
+                            "status": "success",
+
+                            "message": "Session active",
+
+                            "username": self.sessions[token]
+
+                        }).encode())
+
+                    else:
+
+                        conn.send(json.dumps({
+
+                            "status": "error",
+
+                            "message": "Invalid session"
+
+                        }).encode())
+
         except Exception as e:
             conn.send(json.dumps({"status": "error", "message": str(e)}).encode())
         finally:
@@ -113,6 +171,7 @@ class FileSharePeer:
         while True:
             client_conn, _ = server_socket.accept()
             threading.Thread(target=self.handle_client, args=(client_conn,)).start()
+            self.print_active_sessions()
 
 
 if __name__ == "__main__":
