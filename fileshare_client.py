@@ -186,7 +186,17 @@ class FileShareClient:
             print(f"Error checking session: {str(e)}")
             return False
 
-    def list_files(self):
+    def list_my_files(self):
+        if not self.token:
+            return "You must log in first."
+
+        response = self.send_request({
+            "command": "list_my_files",
+            "token": self.token
+        })
+        return response.get("files", []) if response["status"] == "success" else response["message"]
+
+    def list_all_files(self):
         if not self.token:
             return "You must log in first."
 
@@ -194,8 +204,15 @@ class FileShareClient:
             "command": "list_files",
             "token": self.token
         })
-        return response.get("files", []) if response["status"] == "success" else response["message"]
-
+        if response["status"] == "success":
+            for file_info in response["files"]:
+                if isinstance(file_info, dict):
+                    print(f"{file_info['filename']} (uploaded by {file_info['owner']})")
+                else:
+                    print(file_info)  # fallback
+            return "End of list."
+        else:
+            return response["message"]
 
 
 if __name__ == '__main__':
@@ -203,7 +220,7 @@ if __name__ == '__main__':
     print("Welcome to CipherShare!")
 
     while True:
-        print("\nOptions: register, login, upload, download, list, logout,check_session,list_sessions,exit")
+        print("\nOptions: register, login, upload, download, list,list_my_files, logout,check_session,list_sessions,exit")
         choice = input("Enter command: ").strip().lower()
 
         if choice == "register":
@@ -223,7 +240,9 @@ if __name__ == '__main__':
             print(client.download_file())
 
         elif choice == "list":
-            print("Shared Files:", client.list_files())
+            print("Shared Files:", client.list_all_files())
+        elif choice == "list_my_files":
+            print("Shared Files:", client.list_my_files())
         elif choice == "logout":
             print(client.logout())
             client.debug_session_status()
