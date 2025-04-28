@@ -28,9 +28,9 @@ class FileSharePeer:
                 self.sessions = json.load(f)
         else:
             self.sessions = {}
-        self.file_ownership_file = 'shared/file_ownership.json'
+        self.file_ownership_file = 'shared/files_metadata.json'
 
-        if os.path.exists(self.file_ownership_file) and os.path.getsize(self.sessions_file) > 0:
+        if os.path.exists(self.file_ownership_file) and os.path.getsize(self.file_ownership_file) > 0:
             with open(self.file_ownership_file, 'r') as f:
                 self.file_ownership = json.load(f)
         else:
@@ -39,6 +39,20 @@ class FileSharePeer:
     def save_users(self):
         with open(self.users_file, 'w') as f:
             json.dump(self.users, f)
+
+    def set_visibility_on_logout(self, username):
+        for file, metadata in self.file_ownership.items():
+            if metadata["owner"] == username:
+                metadata["original_visibility"] = metadata["visibility"]
+                metadata["visibility"] = "none"
+        self.save_file_ownership()
+
+    def restore_visibility_on_login(self, username):
+        for file, metadata in self.file_ownership.items():
+            if metadata["owner"] == username and metadata["visibility"] == "none":
+                if "original_visibility" in metadata:
+                    metadata["visibility"] = metadata.pop("original_visibility")
+        self.save_file_ownership()
 
     def hash_password(self, password):
         return PasswordHasher().hash(password)
@@ -96,6 +110,7 @@ class FileSharePeer:
                     if self.verify_password(stored_hash, input_password):
                         session_token = str(uuid.uuid4())
                         self.sessions[session_token] = username
+                        self.restore_visibility_on_login(username)
                         conn.send(json.dumps({
                             "status": "success",
                             "message": "Logged in",
@@ -110,15 +125,14 @@ class FileSharePeer:
                     conn.send(json.dumps({"status": "error", "message": "Invalid credentials"}).encode())
             elif command == "logout":
                 token = request.get("token")
-                if token in self.sessions:
-                    del self.sessions[token]
+                username = self.sessions.pop(token, None)
+
+                if username is not None:
                     conn.send(json.dumps({
                         "status": "success",
                         "message": "Logged out successfully"
                     }).encode())
-                    del self.sessions[token]
                     self.save_sessions()
-
                 else:
                     conn.send(json.dumps({
                         "status": "error",
@@ -146,19 +160,33 @@ class FileSharePeer:
                     conn.send(json.dumps({"status": "error", "message": "Authentication required"}).encode())
                     return
 
-                if command == "upload":
+                elif command == "upload":
+                    token = request.get("token")
+                    username = self.sessions.get(token)
+                    if not username:
+                        conn.send(json.dumps({"status": "error", "message": "Unauthorized"}).encode())
+                        return
+
                     filename = request["filename"]
                     iv = bytes.fromhex(request["iv"])
-                    encrypted_data = bytes.fromhex(request["data"])
+                    data = bytes.fromhex(request["data"])
+                    access = request.get("access", "public")
+                    allowed_users = request.get("allowed_users", [])
 
-                    file_path = os.path.join(self.shared_folder, filename)
-                    with open(file_path, 'wb') as f:
-                        f.write(iv + encrypted_data)
-                    # Bind the file to the user
-                    self.file_ownership[filename] = username
+                    filepath = os.path.join(self.shared_folder, filename)
+                    with open(filepath, 'wb') as f:
+                        f.write(iv + data)
+
+                    # Save metadata
+                    self.file_ownership[filename] = {
+                        "owner": username,
+                        "visibility": access,
+                        "allowed_users": allowed_users
+                    }
                     self.save_file_ownership()
 
-                    conn.send(json.dumps({"status": "success", "message": "File uploaded successfully"}).encode())
+                    conn.send(json.dumps({"status": "success", "message": "File uploaded"}).encode())
+
 
                 elif command == "download":
                     filename = request["filename"]
@@ -178,27 +206,32 @@ class FileSharePeer:
                     }).encode())
 
 
+
                 elif command == "list_files":
 
-                    token = request["token"]
+                    token = request.get("token")
 
                     username = self.sessions.get(token)
 
                     if not username:
-                        conn.send(json.dumps({"status": "error", "message": "Invalid session"}).encode())
+                        conn.send(json.dumps({"status": "error", "message": "Unauthorized"}).encode())
 
                         return
 
-                    files = os.listdir(self.shared_folder)
+                    files = []
 
-                    file_info = []
+                    for filename, metadata in self.file_ownership.items():
 
-                    for file in files:
-                        owner = self.file_ownership.get(file, "Unknown")
+                        if metadata["visibility"] == "public":
 
-                        file_info.append({"filename": file, "owner": owner})
+                            files.append({"filename": filename, "owner": metadata["owner"]})
 
-                    conn.send(json.dumps({"status": "success", "files": file_info}).encode())
+                        elif metadata["visibility"] == "private" and username in metadata.get("allowed_users", []):
+
+                            files.append({"filename": filename, "owner": metadata["owner"]})
+
+                    conn.send(json.dumps({"status": "success", "files": files}).encode())
+
             elif command == "list_my_files":
 
                 token = request["token"]
@@ -228,6 +261,13 @@ class FileSharePeer:
                     conn.send(json.dumps({"status": "success", "username": username}).encode())
                 else:
                     conn.send(json.dumps({"status": "error", "message": "Invalid session"}).encode())
+            elif command == "list_users":
+                usernames = list(self.users.keys())
+                conn.send(json.dumps({
+                    "status": "success",
+                    "users": usernames
+                }).encode())
+
 
 
             else:

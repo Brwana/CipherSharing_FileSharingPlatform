@@ -126,6 +126,12 @@ class FileShareClient:
 
         with open(upload_path, 'rb') as f:
             filedata = f.read()
+        access = input("Set access status (public/private): ").strip().lower()
+        allowed_users = []
+
+        if access == "private":
+            users = input("Enter usernames allowed (comma separated): ")
+            allowed_users = [user.strip() for user in users.split(",")]
 
         # Use the stored key (self.key)
         iv, encrypted_data = encrypt_file(filedata, self.key)  # No hardcoded key
@@ -135,7 +141,9 @@ class FileShareClient:
             "token": self.token,
             "filename": filename,
             "iv": iv.hex(),
-            "data": encrypted_data.hex()
+            "data": encrypted_data.hex(),
+            "access": access,
+            "allowed_users": allowed_users
         })
         return response["message"]
 
@@ -220,7 +228,7 @@ if __name__ == '__main__':
     print("Welcome to CipherShare!")
 
     while True:
-        print("\nOptions: register, login, upload, download, list,list_my_files, logout,check_session,list_sessions,exit")
+        print("\nOptions: register, login, upload, download, list,list_my_files, logout,check_session,list_sessions, list_users,exit")
         choice = input("Enter command: ").strip().lower()
 
         if choice == "register":
@@ -238,6 +246,17 @@ if __name__ == '__main__':
 
         elif choice == "download":
             print(client.download_file())
+        elif choice == "list_users":
+            response = client.send_request({
+                "command": "list_users"
+            })
+            if response["status"] == "success":
+                print("\nRegistered Users:")
+                for user in response["users"]:
+                    print(f"- {user}")
+            else:
+                print(f"Error: {response.get('message', 'Unknown error')}")
+
 
         elif choice == "list":
             print("Shared Files:", client.list_all_files())
