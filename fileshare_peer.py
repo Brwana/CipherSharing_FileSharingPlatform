@@ -16,13 +16,18 @@ class FileSharePeer:
         os.makedirs(self.shared_folder, exist_ok=True)
         os.makedirs(os.path.dirname(self.users_file), exist_ok=True)
 
+        self.sessions_file = 'shared/sessions.json'
         if os.path.exists(self.users_file):
             with open(self.users_file, 'r') as f:
                 self.users = json.load(f)
         else:
             self.users = {}
 
-        self.sessions = {}  # session_token -> username
+        if os.path.exists(self.sessions_file) and os.path.getsize(self.sessions_file) > 0:
+            with open(self.sessions_file, 'r') as f:
+                self.sessions = json.load(f)
+        else:
+            self.sessions = {}
 
     def save_users(self):
         with open(self.users_file, 'w') as f:
@@ -30,6 +35,10 @@ class FileSharePeer:
 
     def hash_password(self, password):
         return PasswordHasher().hash(password)
+
+    def save_sessions(self):
+        with open(self.sessions_file, 'w') as f:
+            json.dump(self.sessions, f)
 
     def is_logged_in(self, username):
         """Check if user has an active session"""
@@ -81,6 +90,9 @@ class FileSharePeer:
                             "message": "Logged in",
                             "token": session_token
                         }).encode())
+                        self.sessions[session_token] = username
+                        self.save_sessions()
+
                     else:
                         conn.send(json.dumps({"status": "error", "message": "Invalid credentials"}).encode())
                 else:
@@ -93,11 +105,29 @@ class FileSharePeer:
                         "status": "success",
                         "message": "Logged out successfully"
                     }).encode())
+                    del self.sessions[token]
+                    self.save_sessions()
+
                 else:
                     conn.send(json.dumps({
                         "status": "error",
                         "message": "Invalid session"
                     }).encode())
+            elif command == "list_sessions":
+                # Optional: authenticate using token first
+                token = request.get("token")
+                if token in self.sessions:
+                    conn.send(json.dumps({
+                        "status": "success",
+                        "sessions": self.sessions
+                    }).encode())
+                else:
+                    conn.send(json.dumps({
+                        "status": "error",
+                        "message": "Invalid session"
+                    }).encode())
+
+
             elif command in ["upload", "download", "list_files"]:
                 token = request.get("token")
                 username = self.sessions.get(token)
@@ -107,71 +137,65 @@ class FileSharePeer:
 
                 if command == "upload":
                     filename = request["filename"]
-                    filedata = bytes.fromhex(request["data"])
                     iv = bytes.fromhex(request["iv"])
+                    encrypted_data = bytes.fromhex(request["data"])
 
-                    filepath = os.path.join(self.shared_folder, filename)
-                    with open(filepath, 'wb') as f:
-                        f.write(iv + filedata)  # store IV + encrypted file together
+                    file_path = os.path.join(self.shared_folder, filename)
+                    with open(file_path, 'wb') as f:
+                        f.write(iv + encrypted_data)
 
-                    conn.send(json.dumps({"status": "success", "message": "Uploaded"}).encode())
-
+                    conn.send(json.dumps({"status": "success", "message": "File uploaded successfully"}).encode())
 
                 elif command == "download":
                     filename = request["filename"]
-                    filepath = os.path.join(self.shared_folder, filename)
-                    if os.path.exists(filepath):
-                        with open(filepath, 'rb') as f:
-                            filedata = f.read()
-                        conn.send(json.dumps({"status": "success", "data": filedata.hex()}).encode())
-                    else:
+                    file_path = os.path.join(self.shared_folder, filename)
+
+                    if not os.path.exists(file_path):
                         conn.send(json.dumps({"status": "error", "message": "File not found"}).encode())
+                        return
+
+                    with open(file_path, 'rb') as f:
+                        filedata = f.read()
+
+                    # Send both IV and ciphertext as hex
+                    conn.send(json.dumps({
+                        "status": "success",
+                        "data": filedata.hex()
+                    }).encode())
 
                 elif command == "list_files":
                     files = os.listdir(self.shared_folder)
-                    conn.send(json.dumps({"status": "success", "files": files}).encode())
+                    conn.send(json.dumps({
+                        "status": "success",
+                        "files": files
+                    }).encode())
 
+            elif command == "check_session":
+                token = request.get("token")
+                username = self.sessions.get(token)
+                if username:
+                    conn.send(json.dumps({"status": "success", "username": username}).encode())
+                else:
+                    conn.send(json.dumps({"status": "error", "message": "Invalid session"}).encode())
 
-                elif command == "check_session":
-
-                    token = request.get("token")
-
-                    if token in self.sessions:
-
-                        conn.send(json.dumps({
-
-                            "status": "success",
-
-                            "message": "Session active",
-
-                            "username": self.sessions[token]
-
-                        }).encode())
-
-                    else:
-
-                        conn.send(json.dumps({
-
-                            "status": "error",
-
-                            "message": "Invalid session"
-
-                        }).encode())
+            else:
+                conn.send(json.dumps({"status": "error", "message": "Unknown command"}).encode())
 
         except Exception as e:
-            conn.send(json.dumps({"status": "error", "message": str(e)}).encode())
+                    conn.send(json.dumps({"status": "error", "message": str(e)}).encode())
         finally:
-            conn.close()
+                    conn.close()
 
     def start(self):
-        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server_socket.bind((self.host, self.port))
-        server_socket.listen()
-        print(f"Peer running on {self.host}:{self.port}")
-        while True:
-            client_conn, _ = server_socket.accept()
-            threading.Thread(target=self.handle_client, args=(client_conn,)).start()
-            self.print_active_sessions()
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind((self.host, self.port))
+            s.listen()
+            print(f"FileShare Peer listening on {self.host}:{self.port}")
+
+            while True:
+                conn, addr = s.accept()
+                print(f"Connection from {addr}")
+                threading.Thread(target=self.handle_client, args=(conn,)).start()
 
 
 if __name__ == "__main__":

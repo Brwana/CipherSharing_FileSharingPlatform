@@ -58,6 +58,23 @@ class FileShareClient:
         else:
             print("\nSession Status: Not logged in")
 
+    def list_sessions(self):
+        if not self.token:
+            print("You must be logged in to list sessions.")
+            return
+
+        response = self.send_request({
+            "command": "list_sessions",
+            "token": self.token
+        })
+
+        if response["status"] == "success":
+            print("\nActive Sessions:")
+            for token, username in response["sessions"].items():
+                print(f"- {username} (token: {token[:8]}...)")
+        else:
+            print(f"Error: {response.get('message', 'Unknown error')}")
+
     def login(self, username, password):
         response = self.send_request({
             "command": "login",
@@ -67,6 +84,7 @@ class FileShareClient:
         if response["status"] == "success":
             self.username = username
             self.token = response["token"]  # Save the token
+
         return response["message"]
 
     def logout(self):
@@ -185,7 +203,7 @@ if __name__ == '__main__':
     print("Welcome to CipherShare!")
 
     while True:
-        print("\nOptions: register, login, upload, download, list,exit")
+        print("\nOptions: register, login, upload, download, list, logout,check_session,list_sessions,exit")
         choice = input("Enter command: ").strip().lower()
 
         if choice == "register":
@@ -212,8 +230,13 @@ if __name__ == '__main__':
         elif choice == "check_session":
             print(client.check_session_status())
 
+        elif choice == "list_sessions":
+            client.list_sessions()
+
+
         elif choice == "exit":
             break
+
 
         else:
             print("Invalid option.")
