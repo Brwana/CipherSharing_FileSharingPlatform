@@ -2,8 +2,7 @@ import socket
 import json
 import os
 
-from crypto_utils import encrypt_file, decrypt_file
-
+from crypto_utils import encrypt_file, decrypt_file,generate_file_hash
 
 class FileShareClient:
     def __init__(self, host='localhost', port=9000):
@@ -119,6 +118,7 @@ class FileShareClient:
     def upload_file(self):
         if not self.token:
             return "You must log in first."
+
         filename = input("Filename to upload (from current dir): ")
         upload_path = os.path.join(os.getcwd(), filename)
         if not os.path.exists(upload_path):
@@ -126,6 +126,10 @@ class FileShareClient:
 
         with open(upload_path, 'rb') as f:
             filedata = f.read()
+
+        # Generate the hash (on plaintext)
+        file_hash = generate_file_hash(filedata).hex()
+
         access = input("Set access status (public/private): ").strip().lower()
         allowed_users = []
 
@@ -133,15 +137,17 @@ class FileShareClient:
             users = input("Enter usernames allowed (comma separated): ")
             allowed_users = [user.strip() for user in users.split(",")]
 
-        # Use the stored key (self.key)
-        iv, encrypted_data = encrypt_file(filedata, self.key)  # No hardcoded key
+        # Encrypt the file
+        iv, encrypted_data = encrypt_file(filedata, self.key)
 
+        # Send to the server
         response = self.send_request({
             "command": "upload",
             "token": self.token,
             "filename": filename,
             "iv": iv.hex(),
             "data": encrypted_data.hex(),
+            "hash": file_hash,  # ✅ Send the hash
             "access": access,
             "allowed_users": allowed_users
         })
@@ -150,8 +156,10 @@ class FileShareClient:
     def download_file(self):
         if not self.token:
             return "You must log in first."
+
         filename = input("Filename to download: ")
         save_path = os.path.join(os.getcwd(), filename)
+
         response = self.send_request({
             "command": "download",
             "token": self.token,
@@ -160,14 +168,23 @@ class FileShareClient:
 
         if response["status"] == "success":
             filedata = bytes.fromhex(response["data"])
+            file_hash_server = response.get("hash")  # ✅ Hash received from server
             iv = filedata[:16]
             encrypted_content = filedata[16:]
 
-            # Use the stored key (self.key)
+            # Decrypt
             decrypted_data = decrypt_file(iv, encrypted_content, self.key)
+
+            # Verify integrity
+            computed_hash = generate_file_hash(decrypted_data).hex()
+            if computed_hash == file_hash_server:
+                print("✅ Integrity Verified: File has not been modified.")
+            else:
+                print("⚠️ Warning: File integrity verification failed!")
 
             with open(save_path, 'wb') as f:
                 f.write(decrypted_data)
+
             return "Download complete"
         return response["message"]
 
