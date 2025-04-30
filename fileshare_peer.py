@@ -111,8 +111,10 @@ class FileSharePeer:
                 token = request.get("token")
                 username = self.sessions.pop(token, None)
                 if username is not None:
-                    conn.send(json.dumps({"status": "success", "message": "Logged out successfully"}).encode())
+                    self.set_visibility_on_logout(username)  # 👈 Hide files when user logs out
                     self.save_sessions()
+                    conn.send(json.dumps({"status": "success", "message": "Logged out successfully"}).encode())
+
                 else:
                     conn.send(json.dumps({"status": "error", "message": "Invalid session"}).encode())
 
@@ -146,34 +148,42 @@ class FileSharePeer:
 
                     conn.send(json.dumps({"status": "success", "message": "File uploaded"}).encode())
 
+
                 elif command == "download":
                     filename = request["filename"]
                     file_path = os.path.join(self.shared_folder, filename)
-
                     if not os.path.exists(file_path):
                         conn.send(json.dumps({"status": "error", "message": "File not found"}).encode())
                         return
-
+                    metadata = self.file_ownership.get(filename)
+                    if not metadata:
+                        conn.send(json.dumps({"status": "error", "message": "File metadata missing"}).encode())
+                        return
+                    visibility = metadata.get("visibility", "public")
+                    allowed_users = metadata.get("allowed_users", [])
+                    if visibility == "private" and username not in allowed_users and username != metadata.get("owner"):
+                        conn.send(json.dumps({"status": "error", "message": "Access denied"}).encode())
+                        return
                     with open(file_path, 'rb') as f:
                         filedata = f.read()
-
-                    file_hash = self.file_ownership.get(filename, {}).get("hash", "")  # ✅ Get stored hash
-
+                    file_hash = metadata.get("hash", "")
                     conn.send(json.dumps({
                         "status": "success",
                         "data": filedata.hex(),
-                        "hash": file_hash  # ✅ Send hash back
+                        "hash": file_hash
                     }).encode())
+
 
                 elif command == "list_files":
                     files = []
                     for filename, metadata in self.file_ownership.items():
                         if metadata["visibility"] == "public":
                             files.append({"filename": filename, "owner": metadata["owner"]})
-                        elif metadata["visibility"] == "private" and username in metadata.get("allowed_users", []):
-                            files.append({"filename": filename, "owner": metadata["owner"]})
-
+                        elif metadata["visibility"] == "private":
+                            if username in metadata.get("allowed_users", []) or username == metadata.get("owner"):
+                                files.append({"filename": filename, "owner": metadata["owner"]})
                     conn.send(json.dumps({"status": "success", "files": files}).encode())
+
 
             elif command == "list_my_files":
                 token = request.get("token")

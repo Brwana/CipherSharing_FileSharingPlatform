@@ -48,14 +48,14 @@ class FileShareClient:
         })
         return response["message"]
 
-    def debug_session_status(self):
-        """Show current session status"""
-        if self.token:
-            print(f"\nSession Status: Logged in as {self.username}")
-            print(f"Token: {self.token[:8]}...")
-            print(f"Server verification: {'Valid' if self.check_session_status() else 'Invalid'}")
-        else:
-            print("\nSession Status: Not logged in")
+    # def debug_session_status(self):
+    #     """Show current session status"""
+    #     if self.token:
+    #         print(f"\nSession Status: Logged in as {self.username}")
+    #         print(f"Token: {self.token[:8]}...")
+    #         print(f"Server verification: {'Valid' if self.check_session_status() else 'Invalid'}")
+    #     else:
+    #         print("\nSession Status: Not logged in")
 
     def list_sessions(self):
         if not self.token:
@@ -107,7 +107,7 @@ class FileShareClient:
             if response.get("status") == "success":
                 self.username = None
                 self.token = None
-                print("Successfully logged out")
+                # print("Successfully logged out")
                 return "Logged out successfully"
 
             return f"Logout failed: {response.get('message', 'Unknown error')}"
@@ -245,55 +245,65 @@ if __name__ == '__main__':
     print("Welcome to CipherShare!")
 
     while True:
-        print("\nOptions: register, login, upload, download, list,list_my_files, logout,check_session,list_sessions, list_users,exit")
-        choice = input("Enter command: ").strip().lower()
+        if not client.token:
+            print("\nOptions: register, login, exit")
+            choice = input("Enter command: ").strip().lower()
 
-        if choice == "register":
-            username = input("Username: ")
-            password = input("Password: ")
-            print(client.register(username, password))
+            if choice == "register":
+                username = input("Username: ")
+                password = input("Password: ")
+                print(client.register(username, password))
 
-        elif choice == "login":
-            username = input("Username: ")
-            password = input("Password: ")
-            print(client.login(username, password))
+            elif choice == "login":
+                username = input("Username: ")
+                password = input("Password: ")
+                print(client.login(username, password))
 
-        elif choice == "upload":
-            print(client.upload_file())
+            elif choice == "exit":
+                break
 
-        elif choice == "download":
-            print(client.download_file())
-        elif choice == "list_users":
-            response = client.send_request({
-                "command": "list_users"
-            })
-            if response["status"] == "success":
-                print("\nRegistered Users:")
-                for user in response["users"]:
-                    print(f"- {user}")
             else:
-                print(f"Error: {response.get('message', 'Unknown error')}")
-
-
-        elif choice == "list":
-            print("Shared Files:", client.list_all_files())
-        elif choice == "list_my_files":
-            print("Shared Files:", client.list_my_files())
-        elif choice == "logout":
-            print(client.logout())
-            client.debug_session_status()
-        elif choice == "check_session":
-            print(client.check_session_status())
-
-        elif choice == "list_sessions":
-            client.list_sessions()
-
-
-        elif choice == "exit":
-            break
-
+                print("Invalid option.")
 
         else:
-            print("Invalid option.")
+            print("\nOptions: upload, download, list, list_my_files, logout, check_session, list_sessions, list_users, exit")
+            choice = input("Enter command: ").strip().lower()
+
+            if choice == "upload":
+                print(client.upload_file())
+
+            elif choice == "download":
+                print(client.download_file())
+
+            elif choice == "list":
+                print("Shared Files:", client.list_all_files())
+
+            elif choice == "list_my_files":
+                print("Shared Files:", client.list_my_files())
+
+            elif choice == "logout":
+                print(client.logout())
+
+            elif choice == "check_session":
+                print(client.check_session_status())
+
+            elif choice == "list_sessions":
+                client.list_sessions()
+
+            elif choice == "list_users":
+                response = client.send_request({"command": "list_users"})
+                if response["status"] == "success":
+                    print("\nRegistered Users:")
+                    for user in response["users"]:
+                        print(f"- {user}")
+                else:
+                    print(f"Error: {response.get('message', 'Unknown error')}")
+
+            elif choice == "exit":
+                break
+
+            else:
+                print("Invalid option.")
+
 
 
