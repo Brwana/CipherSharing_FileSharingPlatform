@@ -1,6 +1,10 @@
 import socket
 import json
 import os
+from base64 import urlsafe_b64encode, urlsafe_b64decode
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from crypto_utils import encrypt_file, decrypt_file,generate_file_hash
 
@@ -18,6 +22,16 @@ class FileShareClient:
             s.send(json.dumps(request).encode())
             return json.loads(s.recv(8192).decode())
 
+    def _derive_key_from_password(self, password: str, salt: bytes, iterations: int = 100_000) -> bytes:
+        """Derive a key from password using PBKDF2HMAC."""
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=16,  # 128-bit key
+            salt=salt,
+            iterations=iterations,
+            backend=default_backend()
+        )
+        return kdf.derive(password.encode())
 
     def _generate_key(self, key_length=16):
         """Generate a random AES key (16 bytes for AES-128)."""
@@ -41,10 +55,20 @@ class FileShareClient:
             return key
 
     def register(self, username, password):
+        # Generate salt for the user
+        salt = os.urandom(16)
+
+        # Derive password hash using PBKDF2HMAC
+        password_hash = self._derive_key_from_password(password, salt)
+
+        # Save salt for later logins
+        self._save_user_salt(username, salt)
+
+        # Send base64-encoded password hash to server
         response = self.send_request({
             "command": "register",
             "username": username,
-            "password": password
+            "password": urlsafe_b64encode(password_hash).decode()
         })
         return response["message"]
 
@@ -56,6 +80,19 @@ class FileShareClient:
     #         print(f"Server verification: {'Valid' if self.check_session_status() else 'Invalid'}")
     #     else:
     #         print("\nSession Status: Not logged in")
+    def _save_user_salt(self, username: str, salt: bytes):
+        config_dir = os.path.expanduser("~/.config/fileshare_client")
+        os.makedirs(config_dir, exist_ok=True, mode=0o700)
+        with open(os.path.join(config_dir, f"{username}_salt.bin"), "wb") as f:
+            f.write(salt)
+
+    def _load_user_salt(self, username: str) -> bytes:
+        try:
+            config_dir = os.path.expanduser("~/.config/fileshare_client")
+            with open(os.path.join(config_dir, f"{username}_salt.bin"), "rb") as f:
+                return f.read()
+        except FileNotFoundError:
+            return None
 
     def list_sessions(self):
         if not self.token:
@@ -75,15 +112,21 @@ class FileShareClient:
             print(f"Error: {response.get('message', 'Unknown error')}")
 
     def login(self, username, password):
+        salt = self._load_user_salt(username)
+        if not salt:
+            return "No saved salt for this user. Please register again."
+
+        password_hash = self._derive_key_from_password(password, salt)
+
         response = self.send_request({
             "command": "login",
             "username": username,
-            "password": password
+            "password": urlsafe_b64encode(password_hash).decode()
         })
         if response["status"] == "success":
             self.username = username
-            self.token = response["token"]  # Save the token
-
+            self.token = response["token"]
+            self.key = self._derive_key_from_password(password, salt)  # 🔑 Use derived key for encryption
         return response["message"]
 
     def logout(self):
