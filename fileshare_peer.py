@@ -17,7 +17,7 @@ class FileSharePeer:
         os.makedirs(os.path.dirname(self.users_file), exist_ok=True)
 
         self.sessions_file = 'shared/sessions.json'
-        if os.path.exists(self.users_file):
+        if os.path.exists(self.users_file) and os.path.getsize(self.users_file) > 0:
             with open(self.users_file, 'r') as f:
                 self.users = json.load(f)
         else:
@@ -36,6 +36,26 @@ class FileSharePeer:
         else:
             self.file_ownership = {}
 
+    # Add this method to the FileSharePeer class
+    def search_files(self, query, username):
+        results = []
+        query = query.lower()
+
+        for filename, metadata in self.file_ownership.items():
+            # Check if user has access to this file
+            if metadata["visibility"] == "public" or \
+                    username == metadata["owner"] or \
+                    username in metadata.get("allowed_users", []):
+
+                # Check if query matches filename or metadata
+                if query in filename.lower():
+                    results.append({
+                        "filename": filename,
+                        "owner": metadata["owner"],
+                        "access": metadata["visibility"]
+                    })
+
+        return results
     def save_users(self):
         with open(self.users_file, 'w') as f:
             json.dump(self.users, f)
@@ -117,7 +137,21 @@ class FileSharePeer:
 
                 else:
                     conn.send(json.dumps({"status": "error", "message": "Invalid session"}).encode())
+            # Add this condition to the handle_client method's if-elif chain
+            elif command == "search":
+                token = request.get("token")
+                username = self.sessions.get(token)
+                if not username:
+                    conn.send(json.dumps({"status": "error", "message": "Authentication required"}).encode())
+                    return
 
+                query = request.get("query", "")
+                if not query:
+                    conn.send(json.dumps({"status": "error", "message": "Empty search query"}).encode())
+                    return
+
+                results = self.search_files(query, username)
+                conn.send(json.dumps({"status": "success", "results": results}).encode())
             elif command in ["upload", "download", "list_files"]:
                 token = request.get("token")
                 username = self.sessions.get(token)
@@ -147,6 +181,7 @@ class FileSharePeer:
                     self.save_file_ownership()
 
                     conn.send(json.dumps({"status": "success", "message": "File uploaded"}).encode())
+
 
 
                 elif command == "download":

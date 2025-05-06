@@ -16,6 +16,27 @@ class FileShareClient:
         self.token = None     # Token for authentication
         self.key = self._load_or_generate_key()
 
+    # Add this method to the FileShareClient class
+    def search_files(self, query):
+        if not self.token:
+            return "You must log in first."
+
+        response = self.send_request({
+            "command": "search",
+            "token": self.token,
+            "query": query
+        })
+
+        if response["status"] == "success":
+            if not response["results"]:
+                return "No files found matching your search."
+
+            result_str = "Search Results:\n"
+            for file_info in response["results"]:
+                result_str += f"- {file_info['filename']} (owner: {file_info['owner']}, access: {file_info['access']})\n"
+            return result_str
+        else:
+            return response["message"]
     def send_request(self, request):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.connect((self.host, self.port))
@@ -71,15 +92,6 @@ class FileShareClient:
             "password": urlsafe_b64encode(password_hash).decode()
         })
         return response["message"]
-
-    # def debug_session_status(self):
-    #     """Show current session status"""
-    #     if self.token:
-    #         print(f"\nSession Status: Logged in as {self.username}")
-    #         print(f"Token: {self.token[:8]}...")
-    #         print(f"Server verification: {'Valid' if self.check_session_status() else 'Invalid'}")
-    #     else:
-    #         print("\nSession Status: Not logged in")
     def _save_user_salt(self, username: str, salt: bytes):
         config_dir = os.path.expanduser("~/.config/fileshare_client")
         os.makedirs(config_dir, exist_ok=True, mode=0o700)
@@ -309,7 +321,8 @@ if __name__ == '__main__':
                 print("Invalid option.")
 
         else:
-            print("\nOptions: upload, download, list, list_my_files, logout, check_session, list_sessions, list_users, exit")
+            print(
+                "\nOptions: upload, download, list, list_my_files,search, logout, check_session, list_sessions, list_users, exit")
             choice = input("Enter command: ").strip().lower()
 
             if choice == "upload":
@@ -317,6 +330,7 @@ if __name__ == '__main__':
 
             elif choice == "download":
                 print(client.download_file())
+
 
             elif choice == "list":
                 print("Shared Files:", client.list_all_files())
@@ -329,7 +343,10 @@ if __name__ == '__main__':
 
             elif choice == "check_session":
                 print(client.check_session_status())
-
+            # In the main loop where other commands are handled, add:
+            elif choice == "search":
+                query = input("Enter search query: ")
+                print(client.search_files(query))
             elif choice == "list_sessions":
                 client.list_sessions()
 
